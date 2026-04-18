@@ -4,7 +4,6 @@ import './App.css'
 type Phase = 'picking' | 'deciding' | 'result'
 
 interface GameState {
-  numDoors: number
   carDoor: number
   playerPick: number | null
   revealedDoors: number[]
@@ -20,9 +19,10 @@ interface Stats {
   switchTotal: number
 }
 
+const DEFAULT_DOORS = 3
+
 function freshGame(numDoors: number): GameState {
   return {
-    numDoors,
     carDoor: Math.floor(Math.random() * numDoors),
     playerPick: null,
     revealedDoors: [],
@@ -34,25 +34,29 @@ function freshGame(numDoors: number): GameState {
 
 function hostRevealDoors(numDoors: number, car: number, pick: number): number[] {
   const goats = Array.from({ length: numDoors }, (_, d) => d).filter(d => d !== car && d !== pick)
-  const shuffled = [...goats].sort(() => Math.random() - 0.5)
-  return shuffled.slice(0, numDoors - 2)
+  for (let i = goats.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [goats[i], goats[j]] = [goats[j], goats[i]]
+  }
+  return goats.slice(0, numDoors - 2)
 }
 
 function simulateGames(numDoors: number, n: number) {
-  let swW = 0, swT = 0, stW = 0, stT = 0
+  let switchWins = 0, switchTotal = 0, stayWins = 0, stayTotal = 0
   for (let g = 0; g < n; g++) {
     const car = Math.floor(Math.random() * numDoors)
     const pick = Math.floor(Math.random() * numDoors)
     const revealed = hostRevealDoors(numDoors, car, pick)
     const doSwitch = Math.random() < 0.5
     const remaining = Array.from({ length: numDoors }, (_, d) => d)
-      .find(d => d !== pick && !revealed.includes(d))!
+      .find(d => d !== pick && !revealed.includes(d))
+    if (remaining === undefined) continue
     const final = doSwitch ? remaining : pick
     const won = final === car
-    if (doSwitch) { swT++; if (won) swW++ }
-    else { stT++; if (won) stW++ }
+    if (doSwitch) { switchTotal++; if (won) switchWins++ }
+    else { stayTotal++; if (won) stayWins++ }
   }
-  return { stayWins: stW, stayTotal: stT, switchWins: swW, switchTotal: swT }
+  return { stayWins, stayTotal, switchWins, switchTotal }
 }
 
 function pct(wins: number, total: number): string {
@@ -68,26 +72,16 @@ function WinBar({ wins, total }: { wins: number; total: number }) {
   )
 }
 
-function TheoryBar({ numerator, denominator }: { numerator: number; denominator: number }) {
-  const p = (numerator / denominator) * 100
-  return (
-    <div className="win-bar">
-      <div className="win-bar__fill" style={{ width: `${p}%` }} />
-    </div>
-  )
-}
-
 export default function App() {
-  const [numDoors, setNumDoors] = useState(3)
-  const [game, setGame] = useState<GameState>(() => freshGame(3))
+  const [numDoors, setNumDoors] = useState(DEFAULT_DOORS)
+  const [game, setGame] = useState<GameState>(() => freshGame(DEFAULT_DOORS))
   const [stats, setStats] = useState<Stats>({ stayWins: 0, stayTotal: 0, switchWins: 0, switchTotal: 0 })
   const [simRunning, setSimRunning] = useState(false)
 
   useEffect(() => {
     if (!simRunning) return
-    const doors = numDoors
     const id = setInterval(() => {
-      const r = simulateGames(doors, 50)
+      const r = simulateGames(numDoors, 50)
       setStats(s => ({
         stayWins: s.stayWins + r.stayWins,
         stayTotal: s.stayTotal + r.stayTotal,
@@ -102,6 +96,7 @@ export default function App() {
     setNumDoors(n)
     setGame(freshGame(n))
     setSimRunning(false)
+    setStats({ stayWins: 0, stayTotal: 0, switchWins: 0, switchTotal: 0 })
   }
 
   function pickDoor(i: number) {
@@ -109,15 +104,16 @@ export default function App() {
     setGame(g => ({
       ...g,
       playerPick: i,
-      revealedDoors: hostRevealDoors(g.numDoors, g.carDoor, i),
+      revealedDoors: hostRevealDoors(numDoors, g.carDoor, i),
       phase: 'deciding',
     }))
   }
 
   function decide(sw: boolean) {
     if (game.phase !== 'deciding' || game.playerPick === null) return
-    const remaining = Array.from({ length: game.numDoors }, (_, d) => d)
-      .find(d => d !== game.playerPick && !game.revealedDoors.includes(d))!
+    const remaining = Array.from({ length: numDoors }, (_, d) => d)
+      .find(d => d !== game.playerPick && !game.revealedDoors.includes(d))
+    if (remaining === undefined) return
     const finalPick = sw ? remaining : game.playerPick
     const won = finalPick === game.carDoor
     setGame(g => ({ ...g, finalPick, switched: sw, phase: 'result' }))
@@ -140,8 +136,8 @@ export default function App() {
 
   const { phase, carDoor, playerPick, revealedDoors, finalPick, switched } = game
   const won = phase === 'result' && finalPick === carDoor
-  const stayTheoryPct = Math.round(100 / numDoors)
-  const switchTheoryPct = Math.round(100 * (numDoors - 1) / numDoors)
+  const stayTheoryPct = Math.floor(100 / numDoors)
+  const switchTheoryPct = Math.ceil(100 * (numDoors - 1) / numDoors)
 
   return (
     <div className="app">
@@ -152,9 +148,10 @@ export default function App() {
 
       <div className="settings-section">
         <div className="setting">
-          <label className="setting__label">Doors</label>
+          <label className="setting__label" htmlFor="doors-slider">Doors</label>
           <div className="setting__control">
             <input
+              id="doors-slider"
               type="range"
               min={3}
               max={10}
@@ -168,7 +165,7 @@ export default function App() {
       </div>
 
       <div className="doors">
-        {Array.from({ length: game.numDoors }, (_, i) => {
+        {Array.from({ length: numDoors }, (_, i) => {
           let cls = 'door'
           let content = '?'
 
@@ -190,12 +187,19 @@ export default function App() {
             cls += ` door--open ${isCar ? 'door--car' : 'door--goat'}${isFinal ? ' door--final' : ''}`
           }
 
+          const ariaLabel = phase === 'result'
+            ? `Door ${i + 1}, has a ${i === carDoor ? 'car' : 'goat'}${i === finalPick ? ', your final pick' : ''}`
+            : phase === 'deciding' && revealedDoors.includes(i)
+            ? `Door ${i + 1}, revealed goat`
+            : `Door ${i + 1}`
+
           return (
             <button
               key={i}
               className={cls}
-              onClick={phase === 'picking' ? () => pickDoor(i) : undefined}
+              onClick={() => pickDoor(i)}
               disabled={phase !== 'picking'}
+              aria-label={ariaLabel}
             >
               <span className="door__number">Door {i + 1}</span>
               <span className="door__content">{content}</span>
@@ -204,7 +208,7 @@ export default function App() {
         })}
       </div>
 
-      <div className="controls">
+      <div className="controls" aria-live="polite">
         {phase === 'picking' && <p>Pick a door to begin</p>}
         {phase === 'deciding' && (
           <>
@@ -215,7 +219,7 @@ export default function App() {
             </p>
             <div className="btn-row">
               <button className="btn btn--secondary" onClick={() => decide(false)}>
-                Stay with door {playerPick! + 1}
+                Stay with door {playerPick !== null ? playerPick + 1 : ''}
               </button>
               <button className="btn btn--primary" onClick={() => decide(true)}>
                 Switch doors
@@ -227,7 +231,7 @@ export default function App() {
           <>
             <p className={`result ${won ? 'result--win' : 'result--lose'}`}>
               {won ? '🎉 You win the car!' : '🐐 You got a goat.'}{' '}
-              <span className="result__meta">You {switched ? 'switched' : 'stayed'}.</span>
+              <span className="result__meta">You {(switched ?? false) ? 'switched' : 'stayed'}.</span>
             </p>
             <button className="btn btn--primary" onClick={() => setGame(freshGame(numDoors))}>
               Play again
@@ -248,13 +252,13 @@ export default function App() {
           <div className="stat stat--theory">
             <div className="stat__label">Theory</div>
             <div className="stat__pct">{stayTheoryPct}%</div>
-            <TheoryBar numerator={1} denominator={numDoors} />
+            <WinBar wins={1} total={numDoors} />
             <div className="stat__detail">stay</div>
           </div>
           <div className="stat stat--theory">
             <div className="stat__label">Theory</div>
             <div className="stat__pct">{switchTheoryPct}%</div>
-            <TheoryBar numerator={numDoors - 1} denominator={numDoors} />
+            <WinBar wins={numDoors - 1} total={numDoors} />
             <div className="stat__detail">switch</div>
           </div>
           <div className="stat">

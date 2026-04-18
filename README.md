@@ -1,75 +1,132 @@
-# React + TypeScript + Vite
+# Monty Hall
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+An interactive Monty Hall problem simulator built with React, TypeScript, and Vite.
 
-Currently, two official plugins are available:
+## What is the Monty Hall problem?
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+You're on a game show. There are N doors — one hides a car, the rest hide goats. You pick a door. The host (who knows what's behind every door) then opens N−2 of the remaining doors, always revealing goats. You're now offered a choice: stay with your original pick, or switch to the one remaining unopened door.
 
-## React Compiler
+Should you switch?
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+**Yes.** The math:
 
-Note: This will impact Vite dev & build performances.
+| Strategy | Win probability |
+|----------|----------------|
+| Stay     | 1 / N          |
+| Switch   | (N−1) / N      |
 
-## Expanding the ESLint configuration
+With 3 doors: staying wins 33% of the time, switching wins 67%. The counterintuitive result holds for any N ≥ 3, and the gap widens as N increases.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+**Why?** When you first pick, you have a 1/N chance of being right. The host's reveal carries no new information about your door — it only concentrates the remaining (N−1)/N probability onto the one door left standing. Switching captures that entire probability mass.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Running locally
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Other commands:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run build    # type-check + bundle
+npm run preview  # serve the built output
+npm run lint     # ESLint
 ```
+
+## Implementation
+
+All game logic lives in `src/App.tsx` as a single React component. There are no external state management libraries.
+
+### State
+
+```ts
+interface GameState {
+  carDoor: number        // index of the door hiding the car
+  playerPick: number | null
+  revealedDoors: number[]
+  finalPick: number | null
+  switched: boolean | null
+  phase: 'picking' | 'deciding' | 'result'
+}
+
+interface Stats {
+  stayWins: number
+  stayTotal: number
+  switchWins: number
+  switchTotal: number
+}
+```
+
+`GameState` captures a single round. `Stats` accumulates across all rounds — both manual plays and simulations share the same counters.
+
+### Game phases
+
+```
+picking → deciding → result
+                         ↓
+                    (play again) → picking
+```
+
+- **picking**: all doors closed, player clicks one
+- **deciding**: host has revealed goats, player chooses stay or switch
+- **result**: final door opened, outcome shown, stats updated
+
+### Host reveal — `hostRevealDoors`
+
+```ts
+function hostRevealDoors(numDoors: number, car: number, pick: number): number[]
+```
+
+Collects all doors that are neither the car nor the player's pick (i.e., guaranteed goats), shuffles them with Fisher-Yates, then returns the first `numDoors − 2` of them. This leaves exactly two doors closed: the player's pick and one other.
+
+Fisher-Yates produces a uniform random permutation. The naive `array.sort(() => Math.random() - 0.5)` does not — it introduces bias because comparison-based sorts call the comparator a variable number of times.
+
+### Simulation — `simulateGames`
+
+```ts
+function simulateGames(numDoors: number, n: number): Stats
+```
+
+Runs `n` independent games in a tight loop. Each game:
+1. Places the car randomly
+2. Makes a random initial pick
+3. Calls `hostRevealDoors` to get the revealed doors
+4. Randomly decides to stay or switch (50/50)
+5. Finds the one remaining non-pick non-revealed door as the switch target
+6. Records win/loss for the chosen strategy
+
+The switch target is always unambiguous: after the host reveals `numDoors − 2` goat doors, exactly one non-pick door remains.
+
+Simulations run in two modes:
+
+- **Batch**: `runSim(n)` executes synchronously on the main thread. Fast enough for n ≤ 1000 (single-digit milliseconds).
+- **Continuous**: a `setInterval` fires every 50 ms, adding 50 games per tick. Runs until stopped or the door count changes.
+
+### Door count changes
+
+Changing the slider resets the game, stops the simulation, and clears all stats. Stats accumulated at one door count are not comparable to stats at another (the theoretical win rates differ), so clearing is the correct behavior.
+
+### Accessibility
+
+- Every door `<button>` has a dynamic `aria-label` describing its state (`"Door 3, revealed goat"`, `"Door 1, has a car, your final pick"`, etc.)
+- The controls section carries `aria-live="polite"` so screen readers announce phase transitions (Monty's reveal, the result) without interrupting ongoing speech
+- The doors slider `<label>` is linked to its `<input>` via `htmlFor`/`id`
+
+### Theming
+
+Colors are defined as CSS custom properties in `src/index.css`. Dark mode overrides live in a `@media (prefers-color-scheme: dark)` block. Win/danger colors have separate light and dark values to meet contrast requirements:
+
+| Token | Light | Dark |
+|-------|-------|------|
+| `--color-win` | `#22c55e` | `#4ade80` |
+| `--color-danger` | `#ef4444` | `#f87171` |
+
+## Stack
+
+| Tool | Version |
+|------|---------|
+| React | 19 |
+| TypeScript | 6 |
+| Vite | 8 |
+| React Compiler | enabled |
