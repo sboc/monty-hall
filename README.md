@@ -29,18 +29,26 @@ npm run dev
 Other commands:
 
 ```bash
-npm run build    # type-check + bundle
-npm run preview  # serve the built output
-npm run lint     # ESLint
+npm run build      # type-check + bundle
+npm run preview    # serve the built output
+npm run lint       # ESLint
+npm run test       # run unit tests (Vitest)
+npm run test:watch # run tests in watch mode
 ```
 
 ## Implementation
 
-All game logic lives in `src/App.tsx` as a single React component. There are no external state management libraries.
+Game logic is split across two files:
+
+- `src/lib.ts` — pure functions with no React dependency (game state, host reveal, simulation, formatting)
+- `src/App.tsx` — single React component that wires state and UI; imports everything from `lib.ts`
+
+There are no external state management libraries.
 
 ### State
 
 ```ts
+// src/lib.ts
 interface GameState {
   carDoor: number        // index of the door hiding the car
   playerPick: number | null
@@ -122,6 +130,19 @@ Colors are defined as CSS custom properties in `src/index.css`. Dark mode overri
 | `--color-win` | `#22c55e` | `#4ade80` |
 | `--color-danger` | `#ef4444` | `#f87171` |
 
+## Tests
+
+Unit tests cover all pure functions in `src/lib.ts` (`src/lib.test.ts`):
+
+| Function | What's tested |
+|----------|---------------|
+| `freshGame` | correct initial phase, carDoor in range, all fields null/empty |
+| `hostRevealDoors` | exact reveal count (car=pick and car≠pick paths), never exposes car or player pick, no duplicates, valid indices, Fisher-Yates uniformity |
+| `simulateGames` | total game count, stay/switch win rates converge to `1/N` and `(N-1)/N` at N=3/5/10, switching beats staying |
+| `pct` | zero total, 0%, 100%, rounding, wins-with-zero-total edge case |
+
+The React component (`App.tsx`) is not tested — its logic is thin wiring; the interesting behavior is fully covered by the pure function tests.
+
 ## Stack
 
 | Tool | Version |
@@ -129,4 +150,5 @@ Colors are defined as CSS custom properties in `src/index.css`. Dark mode overri
 | React | 19 |
 | TypeScript | 6 |
 | Vite | 8 |
+| Vitest | 4 |
 | React Compiler | enabled |
